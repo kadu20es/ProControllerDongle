@@ -29,7 +29,7 @@ PC --rumble/LED--> usb_procon.c --> procon.c --> controle
 ```
 
 ## Riscos / pendencias
-- Steam nao vibrou no teste "Sinalizar" (o Steam nao enviou pacote); testar num jogo.
+- (Resolvido) Steam: com o Steam Input ligado (modo "traducao" para XInput) os jogos reconhecem e a vibracao funciona; o "Sinalizar" nao gera pacote. Sem Steam Input (modo nativo) a maioria dos jogos de PC nao reconhece um Pro Controller — igual ao controle original. Decisao do usuario: manter assim (sem modo XInput no firmware).
 - Latencia BT->USB nao medida; BT entrega ~67 relatorios/s.
 - Linux nao testado.
 
