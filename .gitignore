@@ -1,0 +1,13 @@
+# builds (gerados por tools\build.cmd)
+firmware/build/
+firmware/build-release/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+
+# arquivos locais
+.vscode/
+.idea/
+*.log

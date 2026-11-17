@@ -1,0 +1,396 @@
+// Descritores USB do Pro Controller, handshake 0x80, emulacao de subcomandos e ponte BT->USB.
+// Tambem expoe um CDC de diagnostico como driver de stdio (printf -> porta serial).
+#include "usb_procon.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "pico/stdlib.h"
+#include "pico/stdio/driver.h"
+#include "pico/critical_section.h"
+#include "pico/bootrom.h"
+#include "tusb.h"
+
+#include "procon.h"
+
+// =========================================================================================
+// Descritores (copia fiel do Pro Controller original; ver docs/)
+// =========================================================================================
+#define USB_VID 0x057E
+#define USB_PID 0x2009
+
+enum { ITF_HID = 0, ITF_CDC = 1, ITF_CDC_DATA = 2 };
+#define EP_HID_OUT 0x01
+#define EP_HID_IN  0x81
+#define EP_CDC_NOTIF 0x82
+#define EP_CDC_OUT   0x03
+#define EP_CDC_IN    0x83
+
+static const uint8_t hid_report_desc[203] = {
+    0x05,0x01,0x15,0x00,0x09,0x04,0xA1,0x01,0x85,0x30,0x05,0x01,0x05,0x09,0x19,0x01,
+    0x29,0x0A,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x0A,0x55,0x00,0x65,0x00,0x81,0x02,
+    0x05,0x09,0x19,0x0B,0x29,0x0E,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x04,0x81,0x02,
+    0x75,0x01,0x95,0x02,0x81,0x03,0x0B,0x01,0x00,0x01,0x00,0xA1,0x00,0x0B,0x30,0x00,
+    0x01,0x00,0x0B,0x31,0x00,0x01,0x00,0x0B,0x32,0x00,0x01,0x00,0x0B,0x35,0x00,0x01,
+    0x00,0x15,0x00,0x27,0xFF,0xFF,0x00,0x00,0x75,0x10,0x95,0x04,0x81,0x02,0xC0,0x0B,
+    0x39,0x00,0x01,0x00,0x15,0x00,0x25,0x07,0x35,0x00,0x46,0x3B,0x01,0x65,0x14,0x75,
+    0x04,0x95,0x01,0x81,0x02,0x05,0x09,0x19,0x0F,0x29,0x12,0x15,0x00,0x25,0x01,0x75,
+    0x01,0x95,0x04,0x81,0x02,0x75,0x08,0x95,0x34,0x81,0x03,0x06,0x00,0xFF,0x85,0x21,
+    0x09,0x01,0x75,0x08,0x95,0x3F,0x81,0x03,0x85,0x81,0x09,0x02,0x75,0x08,0x95,0x3F,
+    0x81,0x03,0x85,0x01,0x09,0x03,0x75,0x08,0x95,0x3F,0x91,0x83,0x85,0x10,0x09,0x04,
+    0x75,0x08,0x95,0x3F,0x91,0x83,0x85,0x80,0x09,0x05,0x75,0x08,0x95,0x3F,0x91,0x83,
+    0x85,0x82,0x09,0x06,0x75,0x08,0x95,0x3F,0x91,0x83,0xC0};
+
+#if PROCON_DEBUG_CDC
+static const tusb_desc_device_t desc_device = {
+    .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
+    .bDeviceClass = TUSB_CLASS_MISC, .bDeviceSubClass = MISC_SUBCLASS_COMMON, .bDeviceProtocol = MISC_PROTOCOL_IAD,
+    .bMaxPacketSize0 = 64, .idVendor = USB_VID, .idProduct = USB_PID, .bcdDevice = 0x0210,
+    .iManufacturer = 1, .iProduct = 2, .iSerialNumber = 3, .bNumConfigurations = 1};
+#define ITF_COUNT 3
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN + TUD_CDC_DESC_LEN)
+static const uint8_t desc_config[] = {
+    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
+    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, 8),
+    TUD_CDC_DESCRIPTOR(ITF_CDC, 4, EP_CDC_NOTIF, 8, EP_CDC_OUT, EP_CDC_IN, 64),
+};
+#else
+static const tusb_desc_device_t desc_device = {
+    .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
+    .bDeviceClass = 0, .bDeviceSubClass = 0, .bDeviceProtocol = 0,
+    .bMaxPacketSize0 = 64, .idVendor = USB_VID, .idProduct = USB_PID, .bcdDevice = 0x0210,
+    .iManufacturer = 1, .iProduct = 2, .iSerialNumber = 3, .bNumConfigurations = 1};
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
+static const uint8_t desc_config[] = {
+    TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
+    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, 8),
+};
+#endif
+
+static const char *const desc_strings[] = {
+    "",                    // 0: idioma (tratado a parte)
+    "Nintendo Co., Ltd.",  // 1
+    "Pro Controller",      // 2
+    "000000000001",        // 3
+    "Dongle log",          // 4 (CDC)
+};
+
+uint8_t const *tud_descriptor_device_cb(void) { return (uint8_t const *)&desc_device; }
+uint8_t const *tud_descriptor_configuration_cb(uint8_t index) { (void)index; return desc_config; }
+uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) { (void)instance; return hid_report_desc; }
+
+uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+    (void)langid;
+    static uint16_t buf[40];
+    uint8_t n;
+    if (index == 0) {
+        buf[1] = 0x0409; n = 1;
+    } else {
+        if (index >= sizeof(desc_strings) / sizeof(desc_strings[0])) return NULL;
+        const char *s = desc_strings[index];
+        n = (uint8_t)strlen(s);
+        if (n > 38) n = 38;
+        for (uint8_t i = 0; i < n; i++) buf[1 + i] = s[i];
+    }
+    buf[0] = (uint16_t)((TUSB_DESC_STRING << 8) | (2 * n + 2));
+    return buf;
+}
+
+// =========================================================================================
+// Estado compartilhado BT -> USB
+// =========================================================================================
+static critical_section_t state_cs;
+static uint8_t latest[64];          // formato USB do 0x30: [0]=0x30 [1]=timer ... [12]=vib, IMU 13..48
+static volatile bool fresh;
+
+void usb_procon_push_input(const uint8_t *r, uint16_t len) {
+    if (len < 50) return;
+    critical_section_enter_blocking(&state_cs);
+    memcpy(latest, &r[1], 49);      // pula o byte 0xA1 do cabecalho Bluetooth
+    memset(&latest[49], 0, sizeof(latest) - 49);
+    fresh = true;
+    critical_section_exit(&state_cs);
+}
+
+// =========================================================================================
+// Protocolo USB do Pro Controller
+// =========================================================================================
+#define TXQ 16
+static uint8_t txq[TXQ][64];
+static unsigned txq_head, txq_tail;
+static bool stream_on;              // host pediu modo 0x30
+static uint8_t last_rumble[8];
+
+static void queue_packet(const uint8_t *p64) {
+    unsigned next = (txq_head + 1) % TXQ;
+    if (next == txq_tail) { printf("USB: fila de respostas cheia\n"); return; }
+    memcpy(txq[txq_head], p64, 64);
+    txq_head = next;
+}
+
+static void reply_subcmd(uint8_t ack, uint8_t sub, const uint8_t *data, uint8_t dlen) {
+    uint8_t p[64] = {0};
+    critical_section_enter_blocking(&state_cs);
+    memcpy(&p[1], &latest[1], 12);   // timer, bateria, botoes, sticks, vibrador
+    critical_section_exit(&state_cs);
+    p[0] = 0x21;
+    p[13] = ack;
+    p[14] = sub;
+    if (dlen > 49) dlen = 49;
+    if (dlen) memcpy(&p[15], data, dlen);
+    queue_packet(p);
+}
+
+static void handle_subcommand(uint8_t sub, const uint8_t *a, uint16_t alen) {
+    switch (sub) {
+        case 0x02: {                                  // informacoes do dispositivo
+            uint8_t info[12];
+            procon_get_dev_info(info);
+            reply_subcmd(0x82, sub, info, sizeof(info));
+            break;
+        }
+        case 0x03:                                    // modo de relatorio
+            if (alen >= 1 && a[0] == 0x30) { stream_on = true; printf("USB: modo 0x30 ligado\n"); }
+            reply_subcmd(0x80, sub, NULL, 0);
+            break;
+        case 0x10: {                                  // leitura da SPI
+            if (alen < 5) { reply_subcmd(0x80, sub, NULL, 0); break; }
+            uint32_t addr = a[0] | (a[1] << 8) | (a[2] << 16) | ((uint32_t)a[3] << 24);
+            uint8_t n = a[4] > 0x1D ? 0x1D : a[4];
+            uint8_t d[5 + 0x1D];
+            memcpy(d, a, 4); d[4] = n;
+            procon_spi_read(addr, n, &d[5]);
+            reply_subcmd(0x90, sub, d, 5 + n);
+            break;
+        }
+        case 0x30:                                    // LED de jogador: repassa ao controle real
+            if (alen >= 1) procon_forward_player_lights(a[0]);
+            reply_subcmd(0x80, sub, NULL, 0);
+            break;
+        case 0x04: {                                  // tempos dos gatilhos
+            uint8_t z[14] = {0};
+            reply_subcmd(0x83, sub, z, sizeof(z));
+            break;
+        }
+        default:                                      // 0x08, 0x38, 0x40, 0x41, 0x48, 0x22... : so reconhece
+            reply_subcmd(0x80, sub, NULL, 0);
+            break;
+    }
+}
+
+static void handle_usb_cmd(uint8_t cmd) {            // relatorio de saida 0x80 -> resposta 0x81
+    uint8_t p[64] = {0};
+    p[0] = 0x81; p[1] = cmd;
+    switch (cmd) {
+        case 0x01: {                                  // status da conexao: tipo + MAC
+            uint8_t info[12];
+            procon_get_dev_info(info);
+            p[2] = 0x00; p[3] = 0x03;
+            memcpy(&p[4], &info[4], 6);
+            queue_packet(p);
+            break;
+        }
+        case 0x02: case 0x03:                         // handshake / baudrate
+            queue_packet(p);
+            break;
+        case 0x04:                                    // forca modo USB sem timeout: sem resposta;
+            stream_on = true;                         // o controle real passa a enviar 0x30 por padrao via USB
+            break;
+        case 0x05: break;                             // volta a permitir timeout: sem resposta
+        default: break;
+    }
+    static uint32_t n04;
+    if (cmd != 0x04 || (n04++ % 50) == 0) printf("USB: cmd 0x80 0x%02x%s\n", cmd, cmd == 0x04 ? " (repetido)" : "");
+}
+
+static void forward_rumble(const uint8_t *r8) {
+    if (memcmp(r8, last_rumble, 8) == 0) return;
+    memcpy(last_rumble, r8, 8);
+    static unsigned nlog;
+    if (nlog < 60) {
+        nlog++;
+        printf("USB rumble: %02x %02x %02x %02x  %02x %02x %02x %02x\n",
+               r8[0], r8[1], r8[2], r8[3], r8[4], r8[5], r8[6], r8[7]);
+    }
+    procon_forward_rumble(r8);
+}
+
+static uint32_t out_count[256];     // pacotes de saida por report ID (diagnostico)
+
+static void handle_output(const uint8_t *d, uint16_t len) {
+    if (len < 2) return;
+    out_count[d[0]]++;
+    static unsigned logged;
+    if (d[0] != 0x10 && !(d[0] == 0x80 && d[1] == 0x04) && logged < 40) {   // diagnostico: primeiros pacotes do host
+        logged++;
+        printf("USB OUT [%u]:", len);
+        for (uint16_t i = 0; i < len && i < 20; i++) printf(" %02x", d[i]);
+        printf("\n");
+    }
+    switch (d[0]) {
+        case 0x80: handle_usb_cmd(d[1]); break;
+        case 0x10: if (len >= 10) forward_rumble(&d[2]); break;
+        case 0x01:
+            if (len >= 11) {
+                forward_rumble(&d[2]);
+                if (procon_verbose()) printf("USB: subcmd 0x%02x arg %02x\n", d[10], d[11]);
+                handle_subcommand(d[10], &d[11], len - 11);
+            }
+            break;
+        default: break;
+    }
+}
+
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
+                           uint8_t const *buffer, uint16_t bufsize) {
+    (void)instance; (void)report_type;
+    if (report_id != 0) {             // SET_REPORT pelo endpoint de controle: o ID veio separado
+        uint8_t tmp[64];
+        if (bufsize > 63) bufsize = 63;
+        tmp[0] = report_id;
+        memcpy(&tmp[1], buffer, bufsize);
+        handle_output(tmp, bufsize + 1);
+    } else {                          // endpoint OUT: o primeiro byte e o ID
+        handle_output(buffer, bufsize);
+    }
+}
+
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
+                               uint8_t *buffer, uint16_t reqlen) {
+    (void)instance; (void)report_id; (void)report_type; (void)buffer; (void)reqlen;
+    return 0;
+}
+
+void tud_mount_cb(void) { printf("USB: montado pelo host\n"); }
+void tud_umount_cb(void) { stream_on = false; txq_head = txq_tail = 0; printf("USB: desmontado\n"); }
+void tud_suspend_cb(bool remote_wakeup_en) { (void)remote_wakeup_en; }
+void tud_resume_cb(void) {}
+
+// =========================================================================================
+// CDC de diagnostico como driver de stdio
+// =========================================================================================
+#if PROCON_DEBUG_CDC
+#define LOG_RING 4096
+static uint8_t log_ring[LOG_RING];
+static unsigned log_head, log_tail;
+static critical_section_t log_cs;
+static bool log_ready;
+static volatile bool reboot_to_bootsel;
+static uint8_t rx_ring[64];
+static unsigned rx_head, rx_tail;
+
+static void cdc_out_chars(const char *buf, int len) {
+    if (!log_ready) return;
+    critical_section_enter_blocking(&log_cs);
+    for (int i = 0; i < len; i++) {
+        unsigned next = (log_head + 1) % LOG_RING;
+        if (next == log_tail) break;      // cheio: descarta o excedente
+        log_ring[log_head] = (uint8_t)buf[i];
+        log_head = next;
+    }
+    critical_section_exit(&log_cs);
+}
+
+static int cdc_in_chars(char *buf, int len) {
+    int n = 0;
+    while (n < len && rx_tail != rx_head) { buf[n++] = (char)rx_ring[rx_tail]; rx_tail = (rx_tail + 1) % sizeof(rx_ring); }
+    return n ? n : PICO_ERROR_NO_DATA;
+}
+
+static stdio_driver_t cdc_driver = {.out_chars = cdc_out_chars, .in_chars = cdc_in_chars};
+
+static void cdc_pump(void) {
+    if (!tud_cdc_connected()) {           // sem terminal aberto: descarta
+        critical_section_enter_blocking(&log_cs);
+        log_tail = log_head;
+        critical_section_exit(&log_cs);
+        return;
+    }
+    uint32_t room = tud_cdc_write_available();
+    while (room) {
+        uint8_t chunk[64];
+        unsigned n = 0;
+        critical_section_enter_blocking(&log_cs);
+        while (n < sizeof(chunk) && n < room && log_tail != log_head) {
+            chunk[n++] = log_ring[log_tail];
+            log_tail = (log_tail + 1) % LOG_RING;
+        }
+        critical_section_exit(&log_cs);
+        if (!n) break;
+        tud_cdc_write(chunk, n);
+        room -= n;
+    }
+    tud_cdc_write_flush();
+    while (tud_cdc_available()) {
+        uint8_t c;
+        if (tud_cdc_read(&c, 1) != 1) break;
+        unsigned next = (rx_head + 1) % sizeof(rx_ring);
+        if (next != rx_tail) { rx_ring[rx_head] = c; rx_head = next; }
+    }
+}
+
+// abrir a porta a 1200 baud reinicia o Pico em modo BOOTSEL (gravacao sem apertar o botao)
+void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *p_line_coding) {
+    (void)itf;
+    if (p_line_coding->bit_rate == 1200) reboot_to_bootsel = true;   // executado no loop principal
+}
+#endif
+
+// =========================================================================================
+// Inicializacao e loop
+// =========================================================================================
+void usb_procon_init(void) {
+    critical_section_init(&state_cs);
+    memset(latest, 0, sizeof(latest));
+    latest[0] = 0x30;
+#if PROCON_DEBUG_CDC
+    critical_section_init(&log_cs);
+    log_ready = true;
+    stdio_set_driver_enabled(&cdc_driver, true);
+#endif
+    tusb_init();
+}
+
+static void report_out_stats(void) {
+    static uint32_t last_ms, prev[256];
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - last_ms < 2000) return;
+    last_ms = now;
+    bool any = false;
+    for (int i = 0; i < 256; i++) {
+        if (i == 0x80) continue;                  // 0x80 0x04 de keep-alive nao interessa
+        if (out_count[i] != prev[i]) {
+            if (!any) { printf("USB OUT/2s:"); any = true; }
+            printf(" id%02x=%u", i, (unsigned)(out_count[i] - prev[i]));
+            prev[i] = out_count[i];
+        }
+    }
+    if (any) printf("\n");
+}
+
+void usb_procon_task(void) {
+    tud_task();
+    report_out_stats();
+#if PROCON_DEBUG_CDC
+    cdc_pump();
+    if (reboot_to_bootsel) {
+        tud_disconnect();            // solta o barramento antes de reiniciar
+        sleep_ms(100);
+        reset_usb_boot(0, 0);
+    }
+#endif
+    if (!tud_hid_ready()) return;
+    if (txq_tail != txq_head) {                       // respostas de comando tem prioridade
+        tud_hid_report(0, txq[txq_tail], 64);
+        txq_tail = (txq_tail + 1) % TXQ;
+        return;
+    }
+    if (stream_on && fresh) {
+        uint8_t p[64];
+        critical_section_enter_blocking(&state_cs);
+        memcpy(p, latest, 64);
+        fresh = false;
+        critical_section_exit(&state_cs);
+        tud_hid_report(0, p, 64);
+    }
+}
