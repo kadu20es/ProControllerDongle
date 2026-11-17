@@ -19,6 +19,10 @@ Primeira versão pública. Requer **Raspberry Pi Pico 2 W**.
 - Build **release** (sem serial) e **debug** (serial CDC com log e comandos), scripts de build, gravação e medição.
 - Documentação em `docs/` e README em português e inglês.
 
+### Legal
+- O firmware compilado inclui BTstack e cyw43-driver: **uso pessoal e não comercial**. Licenças de terceiros em `THIRD-PARTY-NOTICES.md`.
+- Usa o VID/PID USB da Nintendo (`057E:2009`) só por interoperabilidade.
+
 ### Conhecido
 - Um controle por dongle. Testado só no Windows 11 com um Pro Controller original.
 - O "Sinalizar" do Steam não gera vibração (o Steam não envia o comando); a vibração em jogos funciona.

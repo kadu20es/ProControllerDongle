@@ -17,7 +17,7 @@ Pro Controller ──Bluetooth──▶ Raspberry Pi Pico 2 W ──USB──▶
 > The firmware needs the Bluetooth chip (CYW43439) and the **RP2350** USB. The plain **Pico 2** (no "W") has
 > **no Bluetooth** and will not work. The original Pico / Pico W (RP2040) is not supported by this firmware.
 
-Independent project, not affiliated with Nintendo. "Nintendo", "Switch" and "Pro Controller" are trademarks
+Independent project, not affiliated with Nintendo, for **personal, non-commercial use** (see [Credits and licenses](#credits-and-licenses)). "Nintendo", "Switch" and "Pro Controller" are trademarks
 of their respective owners. Inspired by [DS5Dongle](https://github.com/awalol/DS5Dongle), which does the same
 for the DualSense controller.
 
@@ -111,11 +111,18 @@ The detailed documentation is in Portuguese; see the table in [README.md](README
 
 ## Credits and licenses
 
-- This project's code: [MIT](LICENSE).
+> **Personal, non-commercial use.** The **code in this repository** is [MIT](LICENSE), but the **compiled firmware
+> (`.uf2`) includes BTstack (BlueKitchen) and the CYW43 driver (George Robotics)**, whose licenses allow use and
+> redistribution **only for personal, non-commercial purposes**. **Do not sell** dongles or distribute the firmware
+> commercially without obtaining the proper commercial licenses. Details and full texts in
+> [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) (Portuguese summary, original license texts).
+
+- The dongle uses **Nintendo's USB VID/PID (`057E:2009`)** only so that Steam, SDL and emulators recognize it
+  (interoperability), without authorization from Nintendo or the USB-IF. It is not suitable for products for sale.
 - Controller protocol: community reverse engineering, mainly
-  [Nintendo_Switch_Reverse_Engineering](https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering).
-- Inspiration and architecture reference: [DS5Dongle](https://github.com/awalol/DS5Dongle).
+  [Nintendo_Switch_Reverse_Engineering](https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering) (MIT).
+- Inspiration and architecture reference: [DS5Dongle](https://github.com/awalol/DS5Dongle) (MIT). No code was copied.
 - Libraries: [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk) (BSD-3-Clause),
-  [TinyUSB](https://github.com/hathach/tinyusb) (MIT) and [BTstack](https://github.com/bluekitchen/btstack),
-  which has its **own license** (see `lib/btstack/LICENSE` in the Pico SDK and check the terms before
-  commercial distribution).
+  [TinyUSB](https://github.com/hathach/tinyusb) (MIT), [BTstack](https://github.com/bluekitchen/btstack)
+  (own license, non-commercial) and [cyw43-driver](https://github.com/georgerobotics/cyw43-driver)
+  (license for Raspberry Pi chips).

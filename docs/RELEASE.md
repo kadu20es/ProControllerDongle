@@ -13,6 +13,7 @@ O script compila o firmware **release** e o **debug** e cria a pasta `dist\` (ig
 | `ProControllerDongle-vX.Y.Z.uf2` | Firmware release (uso diário). **É o arquivo principal** |
 | `ProControllerDongle-vX.Y.Z-debug.uf2` | Firmware debug (porta serial de log) |
 | `SHA256SUMS.txt` | Somas de verificação |
+| `THIRD-PARTY-NOTICES.md` | Licenças de terceiros. **Distribua sempre junto do `.uf2`** |
 | `RELEASE_NOTES-vX.Y.Z.md` | Texto pronto para a página do release |
 
 A versão vem de `PROCON_VERSION` em `firmware/CMakeLists.txt`.
@@ -25,10 +26,10 @@ git push -u origin main --tags
 ```
 
 Depois, em **Releases > Draft a new release**, escolha a tag `vX.Y.Z`, cole o `RELEASE_NOTES-vX.Y.Z.md` e anexe os
-arquivos `.uf2` e o `SHA256SUMS.txt`. Ou, com o GitHub CLI:
+arquivos `.uf2`, o `SHA256SUMS.txt` e o `THIRD-PARTY-NOTICES.md`. Ou, com o GitHub CLI:
 
 ```sh
-gh release create vX.Y.Z dist/ProControllerDongle-vX.Y.Z.uf2 dist/ProControllerDongle-vX.Y.Z-debug.uf2 dist/SHA256SUMS.txt \
+gh release create vX.Y.Z dist/ProControllerDongle-vX.Y.Z.uf2 dist/ProControllerDongle-vX.Y.Z-debug.uf2 dist/SHA256SUMS.txt dist/THIRD-PARTY-NOTICES.md \
    --title "Pro Controller Dongle vX.Y.Z" --notes-file dist/RELEASE_NOTES-vX.Y.Z.md
 ```
 

@@ -28,6 +28,7 @@ $relName = "ProControllerDongle-$tag.uf2"
 $dbgName = "ProControllerDongle-$tag-debug.uf2"
 Copy-Item $relUf2 "$dist\$relName"
 Copy-Item $dbgUf2 "$dist\$dbgName"
+Copy-Item "$root\THIRD-PARTY-NOTICES.md" "$dist\THIRD-PARTY-NOTICES.md"
 
 $sums = foreach ($n in $relName, $dbgName) {
   $h = (Get-FileHash "$dist\$n" -Algorithm SHA256).Hash.ToLower()
@@ -49,6 +50,7 @@ por Bluetooth e aparece no PC como um Pro Controller USB nativo (057E:2009).
 | ``$relName`` | **Firmware release** (uso diario, sem porta serial) |
 | ``$dbgName`` | Firmware debug (porta serial de log e comandos de teste) |
 | ``SHA256SUMS.txt`` | Somas de verificacao |
+| ``THIRD-PARTY-NOTICES.md`` | Licencas de terceiros (distribua sempre junto do firmware) |
 
 ## Instalacao
 1. Segure o botao **BOOTSEL** da Pico, plugue-a no USB e solte. Uma unidade **RP2350** aparece.
@@ -61,6 +63,9 @@ Depois, basta apertar um botao do controle para reconectar. Documentacao complet
 - Todos os botoes, sticks, giroscopio/acelerometro, vibracao HD e LEDs de jogador.
 - Reconexao automatica, pareamento pelo BOOTSEL, wake do PC da suspensao e luz do Home como indicador (conectado/bateria).
 - Latencia baixa: o dongle acrescenta menos de 0,5 ms (poll USB de 1 ms, fila sem perda de relatorios).
+
+## Aviso legal
+**Uso pessoal e nao comercial.** O firmware inclui o BTstack e o driver CYW43, cujas licencas permitem uso e redistribuicao apenas para fins pessoais e nao comerciais. Nao venda dongles nem distribua o firmware comercialmente sem as licencas cabiveis. O dispositivo usa o VID/PID USB da Nintendo (057E:2009) so por interoperabilidade. Detalhes em ``THIRD-PARTY-NOTICES.md``.
 
 ## Limitacoes
 Um controle por dongle. Testado no Windows 11 com um Pro Controller original; Linux, macOS e clones nao foram testados.
@@ -77,6 +82,8 @@ over Bluetooth and shows up on the PC as a native USB Pro Controller (057E:2009)
 **Install:** hold BOOTSEL while plugging the Pico in, copy ``$relName`` to the **RP2350** drive. To pair: remove the controller
 from Windows Bluetooth, hold BOOTSEL for 2 s (fast LED blink), then hold the controller's Sync button.
 ``$dbgName`` adds a serial log port. Verify downloads with ``SHA256SUMS.txt``.
+
+**Legal:** personal, non-commercial use only (BTstack and CYW43 driver licenses). Do not sell dongles or redistribute commercially without the proper licenses. The device uses Nintendo's USB VID/PID (057E:2009) for interoperability only. See ``THIRD-PARTY-NOTICES.md``.
 "@
 $notes | Set-Content "$dist\RELEASE_NOTES-$tag.md" -Encoding utf8
 
