@@ -21,7 +21,18 @@ O jitter do PC inclui o escalonamento do Windows/PowerShell (limite superior).
 - Estimativa (sem o tempo interno do controle e do jogo/monitor): media ~12 ms (7,5 de espera BT + ~0,5 dongle + ~4 poll USB); pico tipico ~25-30 ms.
 - Primeira janela, logo apos conectar (setup/Steam sondando): 7,6% descartados e gap BT p95 44 ms — pior que o regime normal.
 
-## Melhorias possiveis
+## Depois das melhorias (poll USB de 1 ms + fila de 8 relatorios), mesmo teste
+| Metrica | Antes | Depois |
+|---|---|---|
+| Ate o host ler: mediana / p95 / max | < 4,5 / < 8,5 / < 12 ms | **< 1,0-1,25 / < 1,0-1,5 / < 2-3,25 ms** |
+| Fila do firmware: max | 5-7 ms | 1,75-2,25 ms |
+| Relatorios descartados (por 5 s) | 0-2 | **0** em todas as janelas |
+| PC: relatorios/s, intervalo mediana / p95, perdidos | 66,8-66,9; 16 / 16 ms; 0-2 | 66,8; **15 / 16 ms; 0** |
+O jitter do Bluetooth (gaps >= 25 ms em 1-4% dos intervalos, max ~45 ms) e o mesmo de antes: e do enlace, nao do dongle.
+Estimativa nova (sem o controle e o jogo): media ~9 ms (7,5 de espera BT + ~0,5 dongle + ~1 USB).
+`HID_POLL_MS` (padrao 1) controla o intervalo do endpoint; `-DHID_POLL_MS=8` volta ao descritor identico ao original.
+
+## Melhorias possiveis (aplicadas: 1 e 2)
 1. `bInterval` do endpoint IN de 8 ms para 1 ms: tira ~3,5 ms da media (deixa de ser identico ao descritor original).
 2. FIFO curta (8) em vez de 1 slot: nao perder toque curto de botao quando chegam relatorios em rajada apos um gap BT.
 3. Dongle longe de portas USB 3.0/hubs e de Wi-Fi 2,4 GHz (jitter BT).

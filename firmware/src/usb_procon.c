@@ -32,6 +32,11 @@
 #else
 #define ITF_CDC ITF_KBD
 #endif
+// Intervalo de poll dos endpoints HID (ms). O Pro Controller original usa 8; 1 tira ~3,5 ms da latencia media
+// (o poll do host passa de 125 para 1000 por segundo). Para um descritor identico ao original: -DHID_POLL_MS=8.
+#ifndef HID_POLL_MS
+#define HID_POLL_MS 1
+#endif
 #define EP_HID_OUT 0x01
 #define EP_HID_IN  0x81
 #define EP_CDC_NOTIF 0x82
@@ -78,7 +83,7 @@ static const tusb_desc_device_t desc_device = {
 #define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN + (PROCON_WAKE ? TUD_HID_DESC_LEN : 0) +                           (PROCON_DEBUG_CDC ? TUD_CDC_DESC_LEN : 0))
 static const uint8_t desc_config[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
-    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, 8),
+    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, HID_POLL_MS),
 #if PROCON_WAKE
     TUD_HID_DESCRIPTOR(ITF_KBD, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(kbd_report_desc), EP_KBD_IN, 8, 10),
 #endif
@@ -128,7 +133,14 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 static volatile bool wake_req;      // BT -> USB: um botao/conexao do controle pede para acordar o PC suspenso
 static critical_section_t state_cs;
 static uint8_t latest[64];          // formato USB do 0x30: [0]=0x30 [1]=timer ... [12]=vib, IMU 13..48
-static volatile bool fresh;
+static volatile bool stream_on;     // host pediu modo 0x30 (so entao os relatorios entram na fila)
+
+// Fila BT -> USB: nenhum relatorio e sobrescrito (um toque rapido de botao nao se perde quando o Bluetooth entrega
+// dois relatorios juntos). Com o poll USB de 1 ms ela esvazia bem mais rapido do que o Bluetooth (67/s) enche.
+#define IN_Q 8
+static uint8_t inq[IN_Q][64];
+static uint32_t inq_ts[IN_Q];
+static unsigned inq_head, inq_tail;
 
 // ---- estatisticas de latencia (diagnostico; impressas a cada 5 s no build debug) ------------
 #define LAT_BINS 48                         // 250 us por bin (0..12 ms); o ultimo acumula o excedente
@@ -152,12 +164,16 @@ void usb_procon_push_input(const uint8_t *r, uint16_t len) {
     critical_section_enter_blocking(&state_cs);
     memcpy(latest, &r[1], 49);      // pula o byte 0xA1 do cabecalho Bluetooth
     memset(&latest[49], 0, sizeof(latest) - 49);
-    if (fresh) st_dropped++;        // o relatorio anterior nem chegou a ser enviado: foi sobrescrito
     if (last_push_us) lat_add(hist_gap, GAP_BINS, now - last_push_us, 1000);
     last_push_us = now;
-    latest_ts_us = now;
     st_in++;
-    fresh = true;
+    if (stream_on) {
+        unsigned next = (inq_head + 1) % IN_Q;
+        if (next == inq_tail) { inq_tail = (inq_tail + 1) % IN_Q; st_dropped++; }   // fila cheia: descarta o mais antigo
+        memcpy(inq[inq_head], latest, 64);
+        inq_ts[inq_head] = now;
+        inq_head = next;
+    }
     critical_section_exit(&state_cs);
 #if PROCON_WAKE
     if ((r[4] | r[5] | r[6]) && tud_suspended()) wake_req = true;   // qualquer botao com o PC suspenso
@@ -170,7 +186,6 @@ void usb_procon_push_input(const uint8_t *r, uint16_t len) {
 #define TXQ 16
 static uint8_t txq[TXQ][64];
 static unsigned txq_head, txq_tail;
-static bool stream_on;              // host pediu modo 0x30
 static uint8_t last_rumble[8];
 
 static void queue_packet(const uint8_t *p64) {
@@ -321,7 +336,7 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 }
 
 void tud_mount_cb(void) { printf("USB: montado pelo host\n"); }
-void tud_umount_cb(void) { stream_on = false; txq_head = txq_tail = 0; printf("USB: desmontado\n"); }
+void tud_umount_cb(void) { stream_on = false; txq_head = txq_tail = 0; inq_head = inq_tail = 0; printf("USB: desmontado\n"); }
 // --- acordar o PC (USB remote wakeup) ----------------------------------------------------
 static bool wake_sent, kbd_pending;
 static uint8_t kbd_state;           // 0 ocioso, 1 enviar F15 pressionado, 2 enviar solto
@@ -476,14 +491,19 @@ void usb_procon_task(void) {
         txq_tail = (txq_tail + 1) % TXQ;
         return;
     }
-    if (stream_on && fresh) {
+    if (stream_on) {
         uint8_t p[64];
-        uint32_t ts;
+        uint32_t ts = 0;
+        bool have = false;
         critical_section_enter_blocking(&state_cs);
-        memcpy(p, latest, 64);
-        ts = latest_ts_us;
-        fresh = false;
+        if (inq_tail != inq_head) {                       // o mais antigo primeiro
+            memcpy(p, inq[inq_tail], 64);
+            ts = inq_ts[inq_tail];
+            inq_tail = (inq_tail + 1) % IN_Q;
+            have = true;
+        }
         critical_section_exit(&state_cs);
+        if (!have) return;
         tud_hid_report(0, p, 64);
         lat_add(hist_fw, LAT_BINS, time_us_32() - ts, 250);
         inflight_ts_us = ts;
