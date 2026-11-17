@@ -270,23 +270,28 @@ static void decode_30(const uint8_t *r, uint16_t len) {
 static critical_section_t fwd_cs;
 static bool fwd_inited;
 static uint8_t fwd_rumble[8];
-static bool fwd_rumble_dirty, fwd_lights_dirty, fwd_pending;
+static bool fwd_rumble_dirty, fwd_lights_dirty, fwd_home_dirty, fwd_pending;
+#define HOME_ARGS_MAX 37
+static uint8_t fwd_home[HOME_ARGS_MAX];
+static uint8_t fwd_home_n;
 static uint8_t fwd_lights;
 static btstack_context_callback_registration_t fwd_reg;
 
 static void fwd_pump(void *ctx) {
     (void)ctx;
-    uint8_t rumble[8], lights = 0;
-    bool do_r, do_l;
+    uint8_t rumble[8], lights = 0, home[HOME_ARGS_MAX], home_n = 0;
+    bool do_r, do_l, do_h;
     critical_section_enter_blocking(&fwd_cs);
-    do_r = fwd_rumble_dirty; do_l = fwd_lights_dirty;
+    do_r = fwd_rumble_dirty; do_l = fwd_lights_dirty; do_h = fwd_home_dirty;
     memcpy(rumble, fwd_rumble, 8); lights = fwd_lights;
-    fwd_rumble_dirty = fwd_lights_dirty = false;
+    memcpy(home, fwd_home, sizeof(home)); home_n = fwd_home_n;
+    fwd_rumble_dirty = fwd_lights_dirty = fwd_home_dirty = false;
     fwd_pending = false;
     critical_section_exit(&fwd_cs);
 
     if (!done || !connected) { printf("FWD descartado (done=%d connected=%d)\n", done, connected); return; }
     if (do_l) send_subcommand(0x30, &lights, 1);
+    if (do_h) send_subcommand(0x38, home, home_n);
     if (do_r) {
         uint8_t b[9];
         b[0] = counter++ & 0x0F;
@@ -315,6 +320,18 @@ void procon_forward_rumble(const uint8_t rumble8[8]) {
     critical_section_enter_blocking(&fwd_cs);
     memcpy(fwd_rumble, rumble8, 8);
     fwd_rumble_dirty = true;
+    critical_section_exit(&fwd_cs);
+    fwd_post();
+}
+
+void procon_forward_home_light(const uint8_t *args, uint8_t n) {
+    if (!fwd_inited) return;
+    if (n > HOME_ARGS_MAX) n = HOME_ARGS_MAX;
+    critical_section_enter_blocking(&fwd_cs);
+    memset(fwd_home, 0, sizeof(fwd_home));
+    memcpy(fwd_home, args, n);
+    fwd_home_n = n;
+    fwd_home_dirty = true;
     critical_section_exit(&fwd_cs);
     fwd_post();
 }

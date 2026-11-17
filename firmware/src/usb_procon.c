@@ -19,12 +19,20 @@
 #define USB_VID 0x057E
 #define USB_PID 0x2009
 
-enum { ITF_HID = 0, ITF_CDC = 1, ITF_CDC_DATA = 2 };
+// Interfaces: 0 = Pro Controller (HID), 1 = teclado HID so para acordar o PC (se PROCON_WAKE), depois o CDC de log.
+#define ITF_HID 0
+#define ITF_KBD 1
+#if PROCON_WAKE
+#define ITF_CDC (ITF_KBD + 1)
+#else
+#define ITF_CDC ITF_KBD
+#endif
 #define EP_HID_OUT 0x01
 #define EP_HID_IN  0x81
 #define EP_CDC_NOTIF 0x82
 #define EP_CDC_OUT   0x03
 #define EP_CDC_IN    0x83
+#define EP_KBD_IN    0x84
 
 static const uint8_t hid_report_desc[203] = {
     0x05,0x01,0x15,0x00,0x09,0x04,0xA1,0x01,0x85,0x30,0x05,0x01,0x05,0x09,0x19,0x01,
@@ -41,31 +49,38 @@ static const uint8_t hid_report_desc[203] = {
     0x75,0x08,0x95,0x3F,0x91,0x83,0x85,0x80,0x09,0x05,0x75,0x08,0x95,0x3F,0x91,0x83,
     0x85,0x82,0x09,0x06,0x75,0x08,0x95,0x3F,0x91,0x83,0xC0};
 
+#if PROCON_WAKE
+// Teclado minimo (boot): usado so para mandar F15 ao acordar o PC. O Windows so oferece "permitir que este
+// dispositivo ative o computador" para dispositivos com aparencia de teclado/mouse.
+static const uint8_t kbd_report_desc[] = {TUD_HID_REPORT_DESC_KEYBOARD()};
+#endif
+
 #if PROCON_DEBUG_CDC
 static const tusb_desc_device_t desc_device = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
     .bDeviceClass = TUSB_CLASS_MISC, .bDeviceSubClass = MISC_SUBCLASS_COMMON, .bDeviceProtocol = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0 = 64, .idVendor = USB_VID, .idProduct = USB_PID, .bcdDevice = 0x0210,
     .iManufacturer = 1, .iProduct = 2, .iSerialNumber = 3, .bNumConfigurations = 1};
-#define ITF_COUNT 3
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN + TUD_CDC_DESC_LEN)
-static const uint8_t desc_config[] = {
-    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
-    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, 8),
-    TUD_CDC_DESCRIPTOR(ITF_CDC, 4, EP_CDC_NOTIF, 8, EP_CDC_OUT, EP_CDC_IN, 64),
-};
 #else
 static const tusb_desc_device_t desc_device = {
     .bLength = sizeof(tusb_desc_device_t), .bDescriptorType = TUSB_DESC_DEVICE, .bcdUSB = 0x0200,
     .bDeviceClass = 0, .bDeviceSubClass = 0, .bDeviceProtocol = 0,
     .bMaxPacketSize0 = 64, .idVendor = USB_VID, .idProduct = USB_PID, .bcdDevice = 0x0210,
     .iManufacturer = 1, .iProduct = 2, .iSerialNumber = 3, .bNumConfigurations = 1};
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
-static const uint8_t desc_config[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
-    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, 8),
-};
 #endif
+
+#define ITF_COUNT (1 + PROCON_WAKE + (PROCON_DEBUG_CDC ? 2 : 0))
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_INOUT_DESC_LEN + (PROCON_WAKE ? TUD_HID_DESC_LEN : 0) +                           (PROCON_DEBUG_CDC ? TUD_CDC_DESC_LEN : 0))
+static const uint8_t desc_config[] = {
+    TUD_CONFIG_DESCRIPTOR(1, ITF_COUNT, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 500),
+    TUD_HID_INOUT_DESCRIPTOR(ITF_HID, 0, HID_ITF_PROTOCOL_NONE, sizeof(hid_report_desc), EP_HID_OUT, EP_HID_IN, 64, 8),
+#if PROCON_WAKE
+    TUD_HID_DESCRIPTOR(ITF_KBD, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(kbd_report_desc), EP_KBD_IN, 8, 10),
+#endif
+#if PROCON_DEBUG_CDC
+    TUD_CDC_DESCRIPTOR(ITF_CDC, 4, EP_CDC_NOTIF, 8, EP_CDC_OUT, EP_CDC_IN, 64),
+#endif
+};
 
 static const char *const desc_strings[] = {
     "",                    // 0: idioma (tratado a parte)
@@ -77,7 +92,13 @@ static const char *const desc_strings[] = {
 
 uint8_t const *tud_descriptor_device_cb(void) { return (uint8_t const *)&desc_device; }
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) { (void)index; return desc_config; }
-uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) { (void)instance; return hid_report_desc; }
+uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
+#if PROCON_WAKE
+    if (instance == 1) return kbd_report_desc;
+#endif
+    (void)instance;
+    return hid_report_desc;
+}
 
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     (void)langid;
@@ -99,6 +120,7 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 // =========================================================================================
 // Estado compartilhado BT -> USB
 // =========================================================================================
+static volatile bool wake_req;      // BT -> USB: um botao/conexao do controle pede para acordar o PC suspenso
 static critical_section_t state_cs;
 static uint8_t latest[64];          // formato USB do 0x30: [0]=0x30 [1]=timer ... [12]=vib, IMU 13..48
 static volatile bool fresh;
@@ -110,6 +132,9 @@ void usb_procon_push_input(const uint8_t *r, uint16_t len) {
     memset(&latest[49], 0, sizeof(latest) - 49);
     fresh = true;
     critical_section_exit(&state_cs);
+#if PROCON_WAKE
+    if ((r[4] | r[5] | r[6]) && tud_suspended()) wake_req = true;   // qualquer botao com o PC suspenso
+#endif
 }
 
 // =========================================================================================
@@ -165,6 +190,10 @@ static void handle_subcommand(uint8_t sub, const uint8_t *a, uint16_t alen) {
         }
         case 0x30:                                    // LED de jogador: repassa ao controle real
             if (alen >= 1) procon_forward_player_lights(a[0]);
+            reply_subcmd(0x80, sub, NULL, 0);
+            break;
+        case 0x38:                                    // luz do botao Home: repassa ao controle real
+            if (alen >= 1) procon_forward_home_light(a, alen > 37 ? 37 : (uint8_t)alen);
             reply_subcmd(0x80, sub, NULL, 0);
             break;
         case 0x04: {                                  // tempos dos gatilhos
@@ -243,7 +272,8 @@ static void handle_output(const uint8_t *d, uint16_t len) {
 
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type,
                            uint8_t const *buffer, uint16_t bufsize) {
-    (void)instance; (void)report_type;
+    (void)report_type;
+    if (instance != 0) return;        // teclado de wake: ignora LEDs (Num Lock etc.)
     if (report_id != 0) {             // SET_REPORT pelo endpoint de controle: o ID veio separado
         uint8_t tmp[64];
         if (bufsize > 63) bufsize = 63;
@@ -263,8 +293,23 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 
 void tud_mount_cb(void) { printf("USB: montado pelo host\n"); }
 void tud_umount_cb(void) { stream_on = false; txq_head = txq_tail = 0; printf("USB: desmontado\n"); }
-void tud_suspend_cb(bool remote_wakeup_en) { (void)remote_wakeup_en; }
-void tud_resume_cb(void) {}
+// --- acordar o PC (USB remote wakeup) ----------------------------------------------------
+static bool wake_sent, kbd_pending;
+static uint8_t kbd_state;           // 0 ocioso, 1 enviar F15 pressionado, 2 enviar solto
+
+void usb_procon_request_wake(void) {
+#if PROCON_WAKE
+    if (tud_suspended()) wake_req = true;
+#endif
+}
+
+void tud_suspend_cb(bool remote_wakeup_en) {
+    printf("USB: suspenso (wake permitido pelo host: %s)\n", remote_wakeup_en ? "sim" : "NAO");
+}
+void tud_resume_cb(void) {
+    printf("USB: retomado\n");
+    if (wake_sent) { wake_sent = false; kbd_pending = true; }
+}
 
 // =========================================================================================
 // CDC de diagnostico como driver de stdio
@@ -371,6 +416,22 @@ static void report_out_stats(void) {
 void usb_procon_task(void) {
     tud_task();
     report_out_stats();
+#if PROCON_WAKE
+    if (wake_req) {
+        wake_req = false;
+        if (tud_suspended()) {
+            bool ok = tud_remote_wakeup();
+            printf("USB: pedido de wake %s\n", ok ? "enviado" : "recusado (host nao permite)");
+            wake_sent = ok;
+        }
+    }
+    if (kbd_pending && tud_hid_n_ready(1)) {                  // depois de retomar: F15 acende a tela
+        static const uint8_t f15[6] = {0x6A, 0, 0, 0, 0, 0};
+        static const uint8_t none[6] = {0};
+        if (kbd_state == 0) { tud_hid_n_keyboard_report(1, 0, 0, f15); kbd_state = 1; }
+        else if (kbd_state == 1) { tud_hid_n_keyboard_report(1, 0, 0, none); kbd_state = 0; kbd_pending = false; }
+    }
+#endif
 #if PROCON_DEBUG_CDC
     cdc_pump();
     if (reboot_to_bootsel) {

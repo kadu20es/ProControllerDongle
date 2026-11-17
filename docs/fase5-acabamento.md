@@ -26,3 +26,19 @@
 - IMU em jogo/emulador com mira por movimento; caixa de movimento do Eden "torta" na mao (provavelmente a pegada, nao conclusivo).
 - Medir latencia BT->USB; avaliar 120 Hz de USB (hoje ~67/s, limite do Bluetooth).
 - Repositorio git proprio para o projeto (o git detectado e o de `E:\Dev`).
+
+## Acordar o PC da suspensao (2026-11-17)
+- **Como**: `usb_procon.c` usa USB remote wakeup (`tud_remote_wakeup`) quando o USB esta suspenso e o controle (a) conecta por BT ou
+  (b) manda um relatorio com algum botao apertado. Depois de retomar, envia F15 por um teclado HID virtual para acender a tela.
+- **Por que um teclado**: o Windows so oferece/ativa "permitir que este dispositivo ative o computador" para HID com cara de teclado/mouse
+  (mesma ideia do DS5Dongle). A interface de teclado e a de indice 1 (`ITF_KBD`); o Pro Controller continua na interface 0, o CDC de log vem depois.
+  O descritor deixa de ser identico ao original (dispositivo composto). Desligar: `-DPROCON_WAKE=OFF`.
+- **Windows**: nao precisou configurar nada (`MSPower_DeviceWakeEnable` ja vinha `True` para a interface do teclado).
+- **Teste real**: PC suspenso (S3), controle desligado, botao A -> o PC acordou e a tela acendeu ("ficou perfeito", usuario).
+- No build debug, o log nao sai durante a suspensao (CDC desconectado); so depois de acordar.
+
+## Luz do botao Home (subcomando 0x38)
+- Antes o dongle so dava ACK ao 0x38 do PC e nao repassava ao controle; a luz nunca acendia. Agora `procon_forward_home_light` repassa
+  ate 37 bytes de argumento. Teste com `tools\home-light.ps1 -State on|off|pulse`: acendeu/pulsou/apagou (usuario confirmou).
+- Formato: byte0 = (mini ciclos << 4) | duracao global; byte1 = (intensidade inicial << 4) | ciclos (0 = infinito).
+  Fixo 100% = `01 F0 F0`; apagado = `01 00 00`. O Steam usa exatamente esses.

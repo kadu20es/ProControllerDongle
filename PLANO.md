@@ -9,7 +9,7 @@ Pico 2W faz ponte: Nintendo Switch Pro Controller (Bluetooth Classic) -> USB nat
 | 2. Bluetooth (pareamento, reconexao, HID host) | concluida — `docs/fase2-resultados.md` |
 | 3. Protocolo (SPI, IMU, vibracao, modo 0x30) | concluida — `docs/fase3-resultados.md` |
 | 4. USB nativo (descritores, handshake, repasse) | concluida — `docs/fase4-resultados.md` |
-| 5. Acabamento (LED, BOOTSEL, release) | concluida — `docs/fase5-acabamento.md` |
+| 5. Acabamento (LED, BOOTSEL, release, wake do PC, luz do Home) | concluida — `docs/fase5-acabamento.md` |
 | 6. Opcional: 2+ controles por dongle | nao iniciada (decisao: 1 controle por dongle) |
 
 Validado: Windows (Chrome Gamepad API no navegador externo com o build release: botoes, sticks, vibracao), Steam (reconhece, handshake),
@@ -17,7 +17,7 @@ Eden/SDL (botoes, IMU ligado), IMU lido no PC. Nao testado: Linux (`hid-nintendo
 
 ## Como usar
 - Pareamento: remova o controle do Bluetooth do Windows; segure BOOTSEL 2 s (LED pisca rapido) e segure Sync no controle.
-- Reconexao: aperte um botao do controle (LED do dongle fica aceso fixo).
+- Reconexao: aperte um botao do controle (LED do dongle fica aceso fixo). Com o PC suspenso, o botao tambem acorda o PC.
 - Build debug: `tools\build.cmd` (+ `tools\flash.ps1`) — porta serial de log (`tools\serial-log.ps1`).
 - Build final: `tools\build.cmd release` + `tools\flash.ps1 -Release` — sem serial; regravar exige BOOTSEL manual.
 

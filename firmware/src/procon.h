@@ -32,5 +32,6 @@ void procon_get_dev_info(uint8_t out[12]);
 // Repassa a vibracao (8 bytes, formato HD) e o LED de jogador para o controle real.
 void procon_forward_rumble(const uint8_t rumble8[8]);
 void procon_forward_player_lights(uint8_t bits);
+void procon_forward_home_light(const uint8_t *args, uint8_t n);   // subcomando 0x38 (luz do botao Home), ate 37 bytes
 
 #endif

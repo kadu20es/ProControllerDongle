@@ -13,7 +13,11 @@ extern "C" {
 #define CFG_TUSB_RHPORT0_MODE   (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
 #define CFG_TUD_ENDPOINT0_SIZE  64
 
-#define CFG_TUD_HID             1
+// PROCON_WAKE=1 adiciona um teclado HID (so envia F15) para o Windows permitir acordar o PC.
+#ifndef PROCON_WAKE
+#define PROCON_WAKE 1
+#endif
+#define CFG_TUD_HID             (1 + PROCON_WAKE)
 #define CFG_TUD_HID_EP_BUFSIZE  64
 
 #if PROCON_DEBUG_CDC

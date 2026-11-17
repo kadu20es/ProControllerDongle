@@ -312,6 +312,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                     connected = true; scanning = false;
                     printf("HID conectado (cid 0x%04x)\n", hid_cid);
                     procon_on_connected();
+                    usb_procon_request_wake();    // controle conectou (botao apertado): acorda o PC suspenso
                     break;
                 }
 
