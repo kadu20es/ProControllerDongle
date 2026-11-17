@@ -130,11 +130,33 @@ static critical_section_t state_cs;
 static uint8_t latest[64];          // formato USB do 0x30: [0]=0x30 [1]=timer ... [12]=vib, IMU 13..48
 static volatile bool fresh;
 
+// ---- estatisticas de latencia (diagnostico; impressas a cada 5 s no build debug) ------------
+#define LAT_BINS 48                         // 250 us por bin (0..12 ms); o ultimo acumula o excedente
+#define GAP_BINS 64                         // 1 ms por bin (0..63 ms)
+static uint16_t hist_fw[LAT_BINS];          // chegada BT -> tud_hid_report() (fila do firmware)
+static uint16_t hist_usb[LAT_BINS];         // chegada BT -> transferencia USB concluida (inclui a espera do poll do host)
+static uint16_t hist_gap[GAP_BINS];         // intervalo entre relatorios BT consecutivos
+static uint32_t latest_ts_us, inflight_ts_us, last_push_us;
+static uint32_t st_in, st_sent, st_dropped;
+
+static void lat_report(void);
+
+static void lat_add(uint16_t *h, unsigned bins, uint32_t value, uint32_t step) {
+    uint32_t b = value / step;
+    h[b >= bins ? bins - 1 : b]++;
+}
+
 void usb_procon_push_input(const uint8_t *r, uint16_t len) {
     if (len < 50) return;
+    uint32_t now = time_us_32();
     critical_section_enter_blocking(&state_cs);
     memcpy(latest, &r[1], 49);      // pula o byte 0xA1 do cabecalho Bluetooth
     memset(&latest[49], 0, sizeof(latest) - 49);
+    if (fresh) st_dropped++;        // o relatorio anterior nem chegou a ser enviado: foi sobrescrito
+    if (last_push_us) lat_add(hist_gap, GAP_BINS, now - last_push_us, 1000);
+    last_push_us = now;
+    latest_ts_us = now;
+    st_in++;
     fresh = true;
     critical_section_exit(&state_cs);
 #if PROCON_WAKE
@@ -423,6 +445,7 @@ static void report_out_stats(void) {
 void usb_procon_task(void) {
     tud_task();
     report_out_stats();
+    lat_report();
 #if PROCON_WAKE
     if (wake_req) {
         wake_req = false;
@@ -455,10 +478,59 @@ void usb_procon_task(void) {
     }
     if (stream_on && fresh) {
         uint8_t p[64];
+        uint32_t ts;
         critical_section_enter_blocking(&state_cs);
         memcpy(p, latest, 64);
+        ts = latest_ts_us;
         fresh = false;
         critical_section_exit(&state_cs);
         tud_hid_report(0, p, 64);
+        lat_add(hist_fw, LAT_BINS, time_us_32() - ts, 250);
+        inflight_ts_us = ts;
+        st_sent++;
     }
+}
+
+// transferencia IN concluida = o host leu o relatorio (depois do poll do endpoint)
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_t len) {
+    if (instance == 0 && len == 64 && report[0] == 0x30 && inflight_ts_us) {
+        lat_add(hist_usb, LAT_BINS, time_us_32() - inflight_ts_us, 250);
+        inflight_ts_us = 0;
+    }
+}
+
+// percentil p (0..100) de um histograma, devolvido em unidades de bin (limite superior do bin)
+static unsigned hist_pct(const uint16_t *h, unsigned bins, unsigned total, unsigned p) {
+    unsigned need = (total * p + 99) / 100, acc = 0;
+    for (unsigned i = 0; i < bins; i++) { acc += h[i]; if (acc >= need) return i + 1; }
+    return bins;
+}
+static unsigned hist_max(const uint16_t *h, unsigned bins) {
+    for (unsigned i = bins; i > 0; i--) if (h[i - 1]) return i;
+    return 0;
+}
+
+static void lat_report(void) {
+    static uint32_t last_ms;
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - last_ms < 5000) return;
+    last_ms = now;
+    uint16_t fw[LAT_BINS], usb[LAT_BINS], gap[GAP_BINS];
+    uint32_t in, sent, drop;
+    critical_section_enter_blocking(&state_cs);
+    memcpy(fw, hist_fw, sizeof(fw)); memcpy(usb, hist_usb, sizeof(usb)); memcpy(gap, hist_gap, sizeof(gap));
+    in = st_in; sent = st_sent; drop = st_dropped;
+    memset(hist_fw, 0, sizeof(hist_fw)); memset(hist_usb, 0, sizeof(hist_usb)); memset(hist_gap, 0, sizeof(hist_gap));
+    st_in = st_sent = st_dropped = 0;
+    critical_section_exit(&state_cs);
+    if (!procon_verbose() || in < 10) return;
+    unsigned nfw = 0, nusb = 0, ngap = 0, over25 = 0;
+    for (unsigned i = 0; i < LAT_BINS; i++) { nfw += fw[i]; nusb += usb[i]; }
+    for (unsigned i = 0; i < GAP_BINS; i++) { ngap += gap[i]; if (i >= 25) over25 += gap[i]; }
+    printf("LAT 5s: bt=%u usb=%u descartados=%u | fila fw p50<%uus p95<%uus max<%uus | ate o host p50<%uus p95<%uus max<%uus | "
+           "gap BT p50<%ums p95<%ums max<%ums >=25ms:%u\n",
+           (unsigned)in, (unsigned)sent, (unsigned)drop,
+           hist_pct(fw, LAT_BINS, nfw, 50) * 250, hist_pct(fw, LAT_BINS, nfw, 95) * 250, hist_max(fw, LAT_BINS) * 250,
+           hist_pct(usb, LAT_BINS, nusb, 50) * 250, hist_pct(usb, LAT_BINS, nusb, 95) * 250, hist_max(usb, LAT_BINS) * 250,
+           hist_pct(gap, GAP_BINS, ngap, 50), hist_pct(gap, GAP_BINS, ngap, 95), hist_max(gap, GAP_BINS), over25);
 }
