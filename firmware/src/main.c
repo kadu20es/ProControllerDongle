@@ -356,7 +356,7 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
 
 int main(void) {
     usb_procon_init();    // TinyUSB + log serial (CDC)
-    printf("\n=== ProControllerDongle fase 4 ===\n");
+    printf("\n=== Pro Controller Dongle v%s ===\n", PROCON_VERSION);
 
     if (cyw43_arch_init()) { printf("cyw43_arch_init falhou\n"); return 1; }
 

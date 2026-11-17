@@ -2,7 +2,7 @@
 
 Pico 2W faz ponte: Nintendo Switch Pro Controller (Bluetooth Classic) -> USB nativo (057E:2009) no PC.
 
-## Estado (2026-11-16)
+## Estado (2026-11-17) — versao 1.0.0 (release em `dist/`, ver `docs/RELEASE.md`)
 | Fase | Resultado |
 |---|---|
 | 1. Ambiente (toolchain, build, gravacao) | concluida — `tools\build.cmd`, `tools\flash.ps1` |

@@ -9,7 +9,7 @@ Pareamento e HID host funcionando entre o Pico 2W e um Pro Controller original.
 4. Pre-requisito: o controle NAO pode estar pareado/conectado ao Windows (ele reconecta ao PC).
 
 ## Dados observados
-- Controle de teste: BD_ADDR `XX:XX:XX:XX:XX:XX`; dongle `XX:XX:XX:XX:XX:XX`.
+- Controle de teste e dongle: enderecos Bluetooth omitidos.
 - Descritor HID via SDP: 170 bytes (o log da fase 2 truncou em 64; limite subido para 256).
   Report IDs vistos no inicio: 0x21, 0x30, 0x31, 0x32, 0x33, 0x3F.
 - `HID_SUBEVENT_REPORT` entrega o relatorio **com o byte de cabecalho `0xA1` na frente**

@@ -11,3 +11,7 @@ firmware/build-release/
 .vscode/
 .idea/
 *.log
+
+# caminhos locais do build e artefatos de release
+tools/env.cmd
+dist/
