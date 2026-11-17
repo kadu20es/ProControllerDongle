@@ -70,8 +70,6 @@ static procon_input_sink_fn input_sink;
 #define PROCON_VERBOSE_DEFAULT 1
 #endif
 static bool connected, done, verbose = PROCON_VERBOSE_DEFAULT;
-static uint8_t last30[64];
-static bool have_last30;
 static unsigned step, retries;
 static uint8_t counter;
 static btstack_timer_source_t step_timer, rumble_timer;
@@ -94,6 +92,9 @@ static void fill_neutral_rumble(uint8_t *p) {
     memcpy(p, n, 4);
     memcpy(p + 4, n, 4);
 }
+
+static uint8_t last30[64];
+static bool have_last30;
 
 static void send_subcommand(uint8_t sub, const uint8_t *args, uint8_t n) {
     uint8_t buf[OUT_LEN];
@@ -187,12 +188,44 @@ static int norm(int v, int c, int mn, int mx) {
     return p > 100 ? 100 : (p < -100 ? -100 : p);
 }
 
+// ---- luz do botao Home (indicador do dongle) -----------------------------------------------
+// Conectado: fixa e fraca. Bateria baixa e sem carregar: pisca lentamente. Subcomando 0x38:
+//   byte0 = (mini ciclos << 4) | duracao global (1..15 x 11,7 ms... ver docs); byte1 = (intensidade inicial << 4) | ciclos (0 = infinito)
+static const uint8_t HOME_DIM[]   = {0x01, 0x30, 0x30};              // fixa, intensidade 3/15 (~20%)
+static const uint8_t HOME_BLINK[] = {0x2F, 0x00, 0x30, 0x28, 0x28};  // 2 mini ciclos de 175 ms: sobe a 20% (fade 2, fica 8) e apaga (fade 2, fica 8) ~3,5 s
+enum { HOME_UNSET = 0, HOME_SOLID, HOME_SLOW_BLINK };
+static uint8_t home_mode;
+static bool force_low_battery;
+
+static bool battery_is_low(void) {
+    if (force_low_battery) return true;
+    if (!have_last30) return false;
+    uint8_t b = last30[3];                  // nibble alto: 8 cheio, 6 medio, 4 baixo, 2 critico, 0 vazio; bit 4 = carregando
+    unsigned level = (b >> 5) & 0x07;       // 0..4
+    bool charging = (b >> 4) & 1;
+    return level <= 1 && !charging;         // critico/vazio (~abaixo de 15%) e fora da tomada
+}
+
+static void update_home_light(void) {
+    if (!done) return;
+    uint8_t want = battery_is_low() ? HOME_SLOW_BLINK : HOME_SOLID;
+    if (want == home_mode) return;
+    home_mode = want;
+    if (want == HOME_SLOW_BLINK) send_subcommand(0x38, HOME_BLINK, sizeof(HOME_BLINK));
+    else send_subcommand(0x38, HOME_DIM, sizeof(HOME_DIM));
+    printf("Luz do Home: %s\n", want == HOME_SLOW_BLINK ? "pisca lento (bateria baixa)" : "fixa e fraca");
+}
+
+void procon_test_low_battery(bool on) { force_low_battery = on; }
+
 // ---- recepcao --------------------------------------------------------------------------
 static void on_setup_done(void) {
     done = true;
     spi_loaded = true;
     btstack_run_loop_remove_timer(&step_timer);
     compute_calibration();
+    home_mode = HOME_UNSET;
+    update_home_light();
     printf("Setup completo: modo 0x30, IMU e vibracao ativos\n");
     procon_dump();
 }
@@ -245,6 +278,7 @@ static void decode_30(const uint8_t *r, uint16_t len) {
     if (len < 50) return;
     memcpy(last30, r, 50);
     have_last30 = true;
+    update_home_light();
     if (input_sink) input_sink(r, len);
     if (!verbose) return;
     log_button_change(r);
@@ -367,7 +401,7 @@ static void start_setup(btstack_timer_source_t *ts) {
 }
 
 void procon_on_connected(void) {
-    connected = true; done = false; step = 0; retries = 0; counter = 0;
+    connected = true; done = false; step = 0; retries = 0; counter = 0; home_mode = HOME_UNSET;
     n_total = n_total_last = n_30 = n_30_last = 0;
     last_rate_ms = last_30_print_ms = 0;
     // espera 1,5 s para o controle terminar de abrir os canais e enviar o descritor

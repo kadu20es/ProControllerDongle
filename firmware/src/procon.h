@@ -22,6 +22,7 @@ void procon_rumble_pulse(void);                        // vibracao curta de test
 void procon_dump(void);                                // imprime SPI em cache
 void procon_set_verbose(bool v);
 bool procon_verbose(void);
+void procon_test_low_battery(bool on);                 // forca o estado "bateria baixa" (teste da luz do Home)
 bool procon_ready(void);                               // setup concluido (modo 0x30 ativo)
 
 // --- usado pela ponte USB (qualquer contexto) ---

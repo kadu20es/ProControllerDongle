@@ -42,3 +42,14 @@
   ate 37 bytes de argumento. Teste com `tools\home-light.ps1 -State on|off|pulse`: acendeu/pulsou/apagou (usuario confirmou).
 - Formato: byte0 = (mini ciclos << 4) | duracao global; byte1 = (intensidade inicial << 4) | ciclos (0 = infinito).
   Fixo 100% = `01 F0 F0`; apagado = `01 00 00`. O Steam usa exatamente esses.
+
+## Luz do Home como indicador do dongle (2026-11-17)
+- **Decisao do usuario**: luz fixa e fraca quando conectado; pisca lentamente quando a bateria esta baixa e o controle conectado.
+  Intensidade (~20%) e ciclo do pisca (~3,5 s) aprovados por teste visual.
+- `procon.c`: depois do setup envia `38 01 30 30` (fixa, intensidade 3/15). Bateria baixa (nibble alto do byte 2 do 0x30: nivel <= 1, ou seja
+  "critico"/"vazio", ~15% ou menos, e sem carregar) -> `38 2F 00 30 28 28` (2 mini ciclos de 175 ms com fade 2/hold 8).
+  O controle so informa 5 niveis (8/6/4/2/0), nao uma porcentagem.
+- Controle desconectado dorme: nao ha como piscar a luz durante a busca/pareamento (isso fica no LED da placa).
+- **O dongle e o dono da luz**: os comandos 0x38 do PC (o Eden manda "apagar" ao iniciar) sao ignorados. `-DPROCON_HOME_PASSTHROUGH=ON`
+  volta a repassar os do PC. O `tools\home-light.ps1` deixou de ter efeito no build padrao.
+- Debug: comando serial `b` simula bateria baixa (testado: pisca lento / volta a fixa e fraca).

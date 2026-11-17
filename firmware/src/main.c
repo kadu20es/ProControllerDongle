@@ -148,6 +148,11 @@ static void poll_serial(void) {
     } else if (c == 'v') {
         procon_set_verbose(!procon_verbose());
         printf("verbose=%d\n", procon_verbose());
+    } else if (c == 'b') {
+        static bool low;
+        low = !low;
+        procon_test_low_battery(low);
+        printf("bateria baixa simulada: %d\n", low);
     } else if (c == 'r') {
         procon_rumble_pulse();
     } else if (c == 'd') {

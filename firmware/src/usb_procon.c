@@ -13,6 +13,11 @@
 
 #include "procon.h"
 
+// 1 = repassa os comandos de luz do Home do PC ao controle (Steam/Eden); 0 = o dongle controla a luz sozinho.
+#ifndef PROCON_HOME_PASSTHROUGH
+#define PROCON_HOME_PASSTHROUGH 0
+#endif
+
 // =========================================================================================
 // Descritores (copia fiel do Pro Controller original; ver docs/)
 // =========================================================================================
@@ -192,8 +197,10 @@ static void handle_subcommand(uint8_t sub, const uint8_t *a, uint16_t alen) {
             if (alen >= 1) procon_forward_player_lights(a[0]);
             reply_subcmd(0x80, sub, NULL, 0);
             break;
-        case 0x38:                                    // luz do botao Home: repassa ao controle real
+        case 0x38:                                    // luz do botao Home
+#if PROCON_HOME_PASSTHROUGH
             if (alen >= 1) procon_forward_home_light(a, alen > 37 ? 37 : (uint8_t)alen);
+#endif                                                // padrao: o dongle e o dono da luz (indicador de conexao/bateria)
             reply_subcmd(0x80, sub, NULL, 0);
             break;
         case 0x04: {                                  // tempos dos gatilhos
